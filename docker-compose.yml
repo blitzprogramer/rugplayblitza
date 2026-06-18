@@ -25,6 +25,8 @@ services:
       - "127.0.0.1:3000:3000"
     depends_on:
       - websocket
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
 
   websocket:
     image: ghcr.io/blitzprogramer/rugplay-websocket:latest
@@ -33,11 +35,20 @@ services:
       - website/.env
     ports:
       - "127.0.0.1:8080:8080"
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
 
-  # Auto-updater: checks GHCR for new image tags and restarts app/websocket.
+  # Auto-updater: checks GHCR for new image tags and restarts labeled containers.
   watchtower:
     image: containrrr/watchtower
     restart: unless-stopped
+    environment:
+      # Docker 29 daemon (API 1.54, min 1.40) rejects watchtower 1.7.1's default
+      # negotiated client API (1.25, "too old"). Pin a version the daemon accepts.
+      - DOCKER_API_VERSION=1.44
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 60 --cleanup app websocket
+    # --label-enable: only update containers with watchtower.enable=true.
+    # (Name-matching with the filter `app websocket` scanned 0 containers because
+    # compose names them rugplay-app-1 / rugplay-websocket-1.)
+    command: --interval 60 --cleanup --label-enable
