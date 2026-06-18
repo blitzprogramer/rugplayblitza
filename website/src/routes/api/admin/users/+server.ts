@@ -32,6 +32,8 @@ export const GET: RequestHandler = async ({ request }) => {
 				isAdmin: user.isAdmin,
 				isBanned: user.isBanned,
 				banReason: user.banReason,
+				baseCurrencyBalance: user.baseCurrencyBalance,
+				gems: user.gems,
 				createdAt: user.createdAt
 			})
 			.from(user)

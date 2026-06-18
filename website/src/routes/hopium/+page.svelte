@@ -1,10 +1,6 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
-	import * as Dialog from '$lib/components/ui/dialog';
 	import * as HoverCard from '$lib/components/ui/hover-card';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Avatar from '$lib/components/ui/avatar';
 	import UserProfilePreview from '$lib/components/self/UserProfilePreview.svelte';
@@ -15,16 +11,12 @@
 	import {
 		TradeUpIcon,
 		TradeDownIcon,
-		Add01Icon,
 		Clock01Icon,
 		SparklesIcon,
 		Globe02Icon,
-		Loading03Icon,
 		Tick01Icon,
 		Cancel01Icon
 	} from '@hugeicons/core-free-icons';
-	import { USER_DATA } from '$lib/stores/user-data';
-	import { PORTFOLIO_SUMMARY, fetchPortfolioSummary } from '$lib/stores/portfolio-data';
 	import { toast } from 'svelte-sonner';
 	import { onMount } from 'svelte';
 	import { formatDateWithYear, formatTimeUntil, formatValue, getPublicUrl } from '$lib/utils';
@@ -36,19 +28,9 @@
 	let questions = $state<PredictionQuestion[]>([]);
 	let loading = $state(true);
 	let activeTab = $state('active');
-	let showCreateDialog = $state(false);
-
-	// Create question form
-	let newQuestion = $state('');
-	let creatingQuestion = $state(false);
-
-	let userBalance = $derived($PORTFOLIO_SUMMARY ? $PORTFOLIO_SUMMARY.baseCurrencyBalance : 0);
 
 	onMount(() => {
 		fetchQuestions();
-		if ($USER_DATA) {
-			fetchPortfolioSummary();
-		}
 	});
 
 	async function fetchQuestions() {
@@ -72,52 +54,6 @@
 		}
 	}
 
-	async function createQuestion() {
-		if (!newQuestion.trim()) {
-			toast.error('Please enter a question');
-			return;
-		}
-
-		creatingQuestion = true;
-		try {
-			const response = await fetch('/api/hopium/questions/create', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					question: newQuestion
-				})
-			});
-
-			const result = await response.json();
-			if (response.ok) {
-				haptic.trigger('success');
-				toast.success('Question created successfully!');
-				showCreateDialog = false;
-				newQuestion = '';
-				fetchQuestions();
-				fetchPortfolioSummary();
-			} else {
-				toast.error(result.error || 'Failed to create question', { duration: 20000 });
-			}
-		} catch (e) {
-			toast.error('Network error');
-		} finally {
-			creatingQuestion = false;
-		}
-	}
-
-	function handleCreateQuestion() {
-		if (!$USER_DATA) {
-			toast.error('You must be logged in to create a question');
-			return;
-		}
-		if (userBalance <= 100_000) {
-			toast.error('You need at least $100,000 in your portfolio (cash) to create a question.');
-			return;
-		}
-		showCreateDialog = true;
-	}
-
 	$effect(() => {
 		if (activeTab) {
 			loading = true;
@@ -135,50 +71,9 @@
 
 <SEO
 	title="Hopium - Rugplay"
-	description="AI-powered prediction markets in the Rugplay simulation game. Create yes/no questions, predict outcomes with virtual currency, and test your forecasting skills."
+	description="AI-generated pop-culture prediction markets in the Rugplay simulation game. Predict YES or NO outcomes with virtual currency."
 	keywords="AI prediction markets game, virtual prediction simulation, cryptocurrency prediction game, forecasting game, virtual currency predictions"
 />
-
-<!-- Create Question Dialog -->
-<Dialog.Root bind:open={showCreateDialog}>
-	<Dialog.Content class="sm:max-w-lg">
-		<Dialog.Header>
-			<Dialog.Title class="flex items-center gap-2">
-				<HugeiconsIcon icon={SparklesIcon} class="h-5 w-5" />
-				Create
-			</Dialog.Title>
-			<Dialog.Description>Create a yes/no question that will be resolved by AI.</Dialog.Description>
-		</Dialog.Header>
-
-		<div class="space-y-4">
-			<div class="space-y-2">
-				<Label for="question">Question *</Label>
-				<Input
-					id="question"
-					bind:value={newQuestion}
-					placeholder="Will *SKIBIDI reach $100 price today?"
-					maxlength={200}
-				/>
-				<p class="text-muted-foreground text-xs">{newQuestion.length}/200 characters</p>
-				<p class="text-muted-foreground text-xs">
-					The AI will automatically determine the appropriate resolution date and criteria.
-				</p>
-			</div>
-		</div>
-
-		<Dialog.Footer>
-			<Button variant="outline" onclick={() => (showCreateDialog = false)}>Cancel</Button>
-			<Button onclick={createQuestion} disabled={creatingQuestion || !newQuestion.trim()}>
-				{#if creatingQuestion}
-					<HugeiconsIcon icon={Loading03Icon} class="h-4 w-4 animate-spin" />
-					Processing...
-				{:else}
-					Publish
-				{/if}
-			</Button>
-		</Dialog.Footer>
-	</Dialog.Content>
-</Dialog.Root>
 
 <div class="container mx-auto max-w-7xl p-6">
 	<header class="mb-8">
@@ -188,7 +83,7 @@
 				Hopium
 			</h1>
 			<p class="text-muted-foreground mb-6">
-				AI-powered prediction markets. Create questions and predict outcomes.
+				AI-generated pop-culture predictions. Bet YES or NO on what's hot right now.
 			</p>
 		</div>
 	</header>
@@ -210,12 +105,6 @@
 					{/each}
 				</div>
 			</div>
-			{#if $USER_DATA}
-				<Button onclick={handleCreateQuestion}>
-					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" />
-					Ask
-				</Button>
-			{/if}
 		</div>
 
 		<!-- Custom Tabs Content -->
@@ -224,8 +113,10 @@
 				<HopiumSkeleton />
 			{:else if questions.length === 0}
 				<div class="py-16 text-center">
-					<h3 class="mb-2 text-lg font-semibold">No questions yet</h3>
-					<p class="text-muted-foreground mb-6">Be the first to create a prediction question!</p>
+					<h3 class="mb-2 text-lg font-semibold">No questions here right now</h3>
+					<p class="text-muted-foreground mb-6">
+						AI generates fresh pop-culture questions every minute — check back shortly.
+					</p>
 				</div>
 			{:else}
 				<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -317,27 +208,39 @@
 								</div>
 
 								<div class="mb-2 mt-2 flex items-center gap-2 text-sm">
-									<HoverCard.Root>
-										<HoverCard.Trigger>
-											<button
-												class="flex cursor-pointer items-center gap-2 text-left hover:underline"
-											>
-												<Avatar.Root class="h-5 w-5">
-													<Avatar.Image
-														src={getPublicUrl(question.creator.image)}
-														alt={question.creator.name}
-													/>
-													<Avatar.Fallback class="text-xs"
-														>{question.creator.name.charAt(0)}</Avatar.Fallback
-													>
-												</Avatar.Root>
-											<span class="text-muted-foreground"><UserName name={question.creator.name} nameColor={question.creator.nameColor} /></span>
-											</button>
-										</HoverCard.Trigger>
-										<HoverCard.Content class="w-80">
-											<UserProfilePreview userId={question.creator.id} />
-										</HoverCard.Content>
-									</HoverCard.Root>
+									{#if question.creator.id === null}
+										<div
+											class="bg-purple-500/15 text-purple-400 flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium"
+										>
+											<HugeiconsIcon icon={SparklesIcon} class="h-3 w-3" />
+											Rugplay AI
+										</div>
+									{:else}
+										<HoverCard.Root>
+											<HoverCard.Trigger>
+												<button
+													class="flex cursor-pointer items-center gap-2 text-left hover:underline"
+												>
+													<Avatar.Root class="h-5 w-5">
+														<Avatar.Image
+															src={getPublicUrl(question.creator.image)}
+															alt={question.creator.name}
+														/>
+														<Avatar.Fallback class="text-xs"
+															>{question.creator.name.charAt(0)}</Avatar.Fallback
+														>
+													</Avatar.Root>
+													<span class="text-muted-foreground"><UserName
+															name={question.creator.name}
+															nameColor={question.creator.nameColor}
+														/></span>
+												</button>
+											</HoverCard.Trigger>
+											<HoverCard.Content class="w-80">
+												<UserProfilePreview userId={question.creator.id!} />
+											</HoverCard.Content>
+										</HoverCard.Root>
+									{/if}
 								</div>
 
 								<!-- User's bet amounts if they have any -->

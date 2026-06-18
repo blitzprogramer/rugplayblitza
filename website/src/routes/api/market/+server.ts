@@ -132,12 +132,13 @@ export async function GET({ url }) {
                 volume24h: coin.volume24h,
                 change24h: coin.change24h,
                 createdAt: coin.createdAt,
-                creatorName: user.name
+                creatorName: user.name,
+                isFeatured: coin.isFeatured
             })
                 .from(coin)
                 .leftJoin(user, eq(coin.creatorId, user.id))
                 .where(whereCondition)
-                .orderBy(orderFn(sortColumn))
+                .orderBy(desc(coin.isFeatured), orderFn(sortColumn))
                 .limit(limit)
                 .offset((page - 1) * limit)
         ]);
@@ -151,7 +152,8 @@ export async function GET({ url }) {
             volume24h: Number(c.volume24h),
             change24h: Number(c.change24h),
             createdAt: c.createdAt,
-            creatorName: c.creatorName
+            creatorName: c.creatorName,
+            isFeatured: c.isFeatured
         }));
 
         return json({

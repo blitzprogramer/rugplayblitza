@@ -8,6 +8,7 @@ export interface CoinData {
 	change24h: number;
 	createdAt: string;
 	creatorName: string | null;
+	isFeatured: boolean;
 }
 
 export interface MarketFilters {

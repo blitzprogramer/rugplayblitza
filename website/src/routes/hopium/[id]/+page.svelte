@@ -19,13 +19,14 @@
 		ChartColumnIcon,
 		MessageQuestionIcon,
 		Tick01Icon,
-		Cancel01Icon
+		Cancel01Icon,
+		SparklesIcon
 	} from '@hugeicons/core-free-icons';
 	import { USER_DATA } from '$lib/stores/user-data';
 	import { PORTFOLIO_SUMMARY, fetchPortfolioSummary } from '$lib/stores/portfolio-data';
 	import { toast } from 'svelte-sonner';
 	import { onMount } from 'svelte';
-	import { formatDateWithYear, getPublicUrl, formatTimeUntil } from '$lib/utils';
+	import { formatDateWithYear, getPublicUrl, formatTimeUntil, formatValue } from '$lib/utils';
 	import { createChart, ColorType, type IChartApi, LineSeries } from 'lightweight-charts';
 	import HopiumQuestionSkeleton from '$lib/components/self/skeletons/HopiumQuestionSkeleton.svelte';
 	import AdSquare from '$lib/components/self/ads/AdSquare.svelte';
@@ -193,6 +194,13 @@
 			: question.userBets.estimatedNoWinnings || 0
 	);
 
+	let isResolved = $derived(question?.status === 'RESOLVED' || question?.status === 'CANCELLED');
+
+	// Real settled payout (0 if the side lost) once resolved; live estimate while active.
+	let yesPayout = $derived(isResolved ? (question?.userBets?.actualYesWinnings ?? 0) : estimatedYesPayout);
+	let noPayout = $derived(isResolved ? (question?.userBets?.actualNoWinnings ?? 0) : estimatedNoPayout);
+	let netResult = $derived(yesPayout + noPayout - (question?.userBets?.totalAmount ?? 0));
+
 	let estimatedWin = $derived(
 		(() => {
 			const amount = Number(customBetAmount);
@@ -265,24 +273,33 @@
 		<div class="text-muted-foreground mb-4 mt-3 flex flex-wrap items-center gap-1.5 text-xs">
 			<span>Created by</span>
 
-			<HoverCard.Root>
-				<HoverCard.Trigger
-					class="flex max-w-[180px] cursor-pointer items-center gap-1 rounded-sm underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-8 sm:max-w-[220px]"
-					onclick={() => goto(`/user/${question?.creator.username}`)}
+			{#if question.creator.id === null}
+				<div
+					class="bg-purple-500/15 text-purple-400 flex items-center gap-1 rounded-full px-2 py-0.5 font-medium"
 				>
-					<Avatar.Root class="h-4 w-4">
-						<Avatar.Image
-							src={getPublicUrl(question.creator.image)}
-							alt={question.creator.username}
-						/>
-						<Avatar.Fallback>{question.creator.username.charAt(0)}</Avatar.Fallback>
-					</Avatar.Root>
-					<span><UserName name={question.creator.name} nameColor={question.creator.nameColor} /> (@{question.creator.username})</span>
-				</HoverCard.Trigger>
-				<HoverCard.Content class="w-80" side="bottom" sideOffset={3}>
-					<UserProfilePreview userId={question.creator.id} />
-				</HoverCard.Content>
-			</HoverCard.Root>
+					<HugeiconsIcon icon={SparklesIcon} class="h-3 w-3" />
+					Rugplay AI
+				</div>
+			{:else}
+				<HoverCard.Root>
+					<HoverCard.Trigger
+						class="flex max-w-[180px] cursor-pointer items-center gap-1 rounded-sm underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-8 sm:max-w-[220px]"
+						onclick={() => goto(`/user/${question?.creator.username}`)}
+					>
+						<Avatar.Root class="h-4 w-4">
+							<Avatar.Image
+								src={getPublicUrl(question.creator.image)}
+								alt={question.creator.username}
+							/>
+							<Avatar.Fallback>{question.creator.username.charAt(0)}</Avatar.Fallback>
+						</Avatar.Root>
+						<span><UserName name={question.creator.name} nameColor={question.creator.nameColor} /> (@{question.creator.username})</span>
+					</HoverCard.Trigger>
+					<HoverCard.Content class="w-80" side="bottom" sideOffset={3}>
+						<UserProfilePreview userId={question.creator.id!} />
+					</HoverCard.Content>
+				</HoverCard.Root>
+			{/if}
 		</div>
 
 		<div class="grid gap-8">
@@ -482,7 +499,7 @@
 										<div>
 											<div class="text-sm font-medium text-green-600">YES Stake</div>
 											<div class="text-muted-foreground text-xs">
-												Payout: ${estimatedYesPayout.toFixed(2)}
+												{isResolved ? 'Result' : 'Payout'}: ${yesPayout.toFixed(2)}
 											</div>
 										</div>
 										<div class="text-lg font-bold text-green-600">
@@ -495,7 +512,7 @@
 										<div>
 											<div class="text-sm font-medium text-red-600">NO Stake</div>
 											<div class="text-muted-foreground text-xs">
-												Payout: ${estimatedNoPayout.toFixed(2)}
+												{isResolved ? 'Result' : 'Payout'}: ${noPayout.toFixed(2)}
 											</div>
 										</div>
 										<div class="text-lg font-bold text-red-600">
@@ -503,13 +520,22 @@
 										</div>
 									</div>
 								{/if}
-								{#if question.userBets.yesAmount > 0 && question.userBets.noAmount > 0}
+								{#if (question.userBets.yesAmount > 0 && question.userBets.noAmount > 0) || isResolved}
 									<Separator />
 								{/if}
-								<div class="flex items-center justify-between">
-									<span class="text-muted-foreground text-sm font-medium">Total Invested</span>
-									<span class="text-lg font-bold">${question.userBets.totalAmount.toFixed(2)}</span>
-								</div>
+								{#if isResolved}
+									<div class="flex items-center justify-between">
+										<span class="text-muted-foreground text-sm font-medium">Net result</span>
+										<span class="text-lg font-bold {netResult >= 0 ? 'text-green-600' : 'text-red-600'}">
+											{netResult >= 0 ? '+' : ''}{formatValue(netResult)}
+										</span>
+									</div>
+								{:else}
+									<div class="flex items-center justify-between">
+										<span class="text-muted-foreground text-sm font-medium">Total Invested</span>
+										<span class="text-lg font-bold">${question.userBets.totalAmount.toFixed(2)}</span>
+									</div>
+								{/if}
 							</div>
 						</Card.Content>
 					</Card.Root>
@@ -575,6 +601,27 @@
 					</Card.Content>
 				</Card.Root>
 			</div>
+
+			{#if question.aiReasoning}
+				<Card.Root>
+					<Card.Header>
+						<Card.Title class="flex items-center gap-3 text-lg font-bold">
+							<div class="bg-purple-500/15 rounded-full p-2">
+								<HugeiconsIcon icon={SparklesIcon} class="h-5 w-5 text-purple-400" />
+							</div>
+							AI Reasoning
+							{#if question.aiConfidence !== null && question.aiConfidence !== undefined}
+								<Badge variant="outline" class="ml-auto">{question.aiConfidence}% confidence</Badge>
+							{/if}
+						</Card.Title>
+					</Card.Header>
+					<Card.Content>
+						<p class="text-muted-foreground whitespace-pre-line text-sm leading-relaxed">
+							{question.aiReasoning}
+						</p>
+					</Card.Content>
+				</Card.Root>
+			{/if}
 
 			<AdSquare />
 

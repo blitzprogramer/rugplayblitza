@@ -1,9 +1,8 @@
 import { db } from '$lib/server/db';
 import { predictionQuestion, predictionBet, user, accountDeletionRequest, session, account, promoCodeRedemption, userPortfolio, commentLike, comment, transaction, coin } from '$lib/server/db/schema';
 import { eq, and, lte, isNull } from 'drizzle-orm';
-import { resolveQuestion, getRugplayData } from '$lib/server/ai';
-import { createNotification } from '$lib/server/notification';
-import { formatValue } from '$lib/utils';
+import { resolveQuestion, getRugplayData, generateQuestions } from '$lib/server/ai';
+import { cancelQuestionAndRefund, resolveQuestionWithOutcome, getHopiumSettings } from '$lib/server/hopium';
 
 export async function resolveExpiredQuestions() {
     const now = new Date();
@@ -36,196 +35,20 @@ export async function resolveExpiredQuestions() {
                     question.requiresWebSearch,
                     rugplayData
                 );
-                    console.log('Resolution result:', resolution);
+                console.log('Resolution result:', resolution);
 
                 if (resolution.confidence < 50) {
                     console.log(`Cancelling question ${question.id} due to low confidence: ${resolution.confidence}`);
-
-                    await db.transaction(async (tx) => {
-                        // Mark question as cancelled
-                        await tx
-                            .update(predictionQuestion)
-                            .set({
-                                status: 'CANCELLED',
-                                resolvedAt: now,
-                            })
-                            .where(eq(predictionQuestion.id, question.id));
-
-                        // Get all bets for this question
-                        const bets = await tx
-                            .select({
-                                id: predictionBet.id,
-                                userId: predictionBet.userId,
-                                side: predictionBet.side,
-                                amount: predictionBet.amount,
-                            })
-                            .from(predictionBet)
-                            .where(and(
-                                eq(predictionBet.questionId, question.id),
-                                isNull(predictionBet.settledAt)
-                            ));
-
-                        const notificationsToCreate: Array<{
-                            userId: number;
-                            amount: number;
-                        }> = [];
-
-                        // Refund all bets
-                        for (const bet of bets) {
-                            const refundAmount = Number(bet.amount);
-
-                            // Mark bet as settled with full refund
-                            await tx
-                                .update(predictionBet)
-                                .set({
-                                    actualWinnings: refundAmount.toFixed(8),
-                                    settledAt: now,
-                                })
-                                .where(eq(predictionBet.id, bet.id));
-
-                            // Refund the user
-                            if (bet.userId !== null) {
-                                const [userData] = await tx
-                                    .select({ baseCurrencyBalance: user.baseCurrencyBalance })
-                                    .from(user)
-                                    .where(eq(user.id, bet.userId))
-                                    .limit(1);
-
-                                if (userData) {
-                                    const newBalance = Number(userData.baseCurrencyBalance) + refundAmount;
-                                    await tx
-                                        .update(user)
-                                        .set({
-                                            baseCurrencyBalance: newBalance.toFixed(8),
-                                            updatedAt: now,
-                                        })
-                                        .where(eq(user.id, bet.userId));
-                                }
-
-                                notificationsToCreate.push({
-                                    userId: bet.userId,
-                                    amount: refundAmount
-                                });
-                            }
-                        }
-
-                        // Create refund notifications for all users who had bets
-                        for (const notifData of notificationsToCreate) {
-                            const { userId, amount } = notifData;
-
-                            const title = 'Prediction skipped 🥀';
-                            const message = `You received a full refund of ${formatValue(amount)} for "${question.question}". We recommend predicting on more reliable questions!`;
-
-                            await createNotification(
-                                userId.toString(),
-                                'HOPIUM',
-                                title,
-                                message,
-                                `/hopium/${question.id}`
-                            );
-                        }
-                    });
+                    await cancelQuestionAndRefund(question.id, resolution.reasoning, resolution.confidence);
                     continue;
                 }
 
-                await db.transaction(async (tx) => {
-                    await tx
-                        .update(predictionQuestion)
-                        .set({
-                            status: 'RESOLVED',
-                            aiResolution: resolution.resolution,
-                            resolvedAt: now,
-                        })
-                        .where(eq(predictionQuestion.id, question.id));
-
-                    const bets = await tx
-                        .select({
-                            id: predictionBet.id,
-                            userId: predictionBet.userId,
-                            side: predictionBet.side,
-                            amount: predictionBet.amount,
-                        })
-                        .from(predictionBet)
-                        .where(and(
-                            eq(predictionBet.questionId, question.id),
-                            isNull(predictionBet.settledAt)
-                        ));
-
-                    const totalPool = Number(question.totalYesAmount) + Number(question.totalNoAmount);
-                    const winningSideTotal = resolution.resolution
-                        ? Number(question.totalYesAmount)
-                        : Number(question.totalNoAmount);
-
-                    const notificationsToCreate: Array<{
-                        userId: number;
-                        amount: number;
-                        winnings: number;
-                        won: boolean;
-                    }> = [];
-
-                    for (const bet of bets) {
-                        const won = bet.side === resolution.resolution;
-
-                        const winnings = won && winningSideTotal > 0
-                            ? (totalPool / winningSideTotal) * Number(bet.amount)
-                            : 0;
-
-                        await tx
-                            .update(predictionBet)
-                            .set({
-                                actualWinnings: winnings.toFixed(8),
-                                settledAt: now,
-                            })
-                            .where(eq(predictionBet.id, bet.id));
-
-                        if (won && winnings > 0 && bet.userId !== null) {
-                            const [userData] = await tx
-                                .select({ baseCurrencyBalance: user.baseCurrencyBalance })
-                                .from(user)
-                                .where(eq(user.id, bet.userId))
-                                .limit(1);
-
-                            if (userData) {
-                                const newBalance = Number(userData.baseCurrencyBalance) + winnings;
-                                await tx
-                                    .update(user)
-                                    .set({
-                                        baseCurrencyBalance: newBalance.toFixed(8),
-                                        updatedAt: now,
-                                    })
-                                    .where(eq(user.id, bet.userId));
-                            }
-                        }
-
-                        if (bet.userId !== null) {
-                            notificationsToCreate.push({
-                                userId: bet.userId,
-                                amount: Number(bet.amount),
-                                winnings,
-                                won
-                            });
-                        }
-                    }
-
-                    // Create notifications for all users who had bets
-                    for (const notifData of notificationsToCreate) {
-                        const { userId, amount, winnings, won } = notifData;
-
-                        const title = won ? 'Prediction won! 🎉' : 'Prediction lost ;(';
-                        const message = won
-                            ? `You won ${formatValue(winnings)} on "${question.question}"`
-                            : `You lost ${formatValue(amount)} on "${question.question}"`;
-
-                        await createNotification(
-                            userId.toString(),
-                            'HOPIUM',
-                            title,
-                            message,
-                            `/hopium/${question.id}`
-                        );
-                    }
-                });
-
+                await resolveQuestionWithOutcome(
+                    question.id,
+                    resolution.resolution,
+                    resolution.confidence,
+                    resolution.reasoning
+                );
             } catch (error) {
                 console.error(`Failed to resolve question ${question.id}:`, error);
             }
@@ -303,5 +126,53 @@ export async function processAccountDeletions() {
         }
     } catch (error) {
         console.error('Error processing account deletions:', error);
+    }
+}
+
+// Hopium 2.0: keep the pool of AI-generated pop-culture questions topped up to
+// the target count. AI-only (creatorId = null). Called every minute by the
+// scheduler alongside resolveExpiredQuestions().
+export async function topUpHopiumQuestions() {
+    try {
+        const settings = await getHopiumSettings();
+        if (!settings.autogenerate) {
+            return; // Admin has paused AI question generation.
+        }
+
+        const active = await db
+            .select({ question: predictionQuestion.question })
+            .from(predictionQuestion)
+            .where(eq(predictionQuestion.status, 'ACTIVE'));
+
+        const deficit = settings.targetCount - active.length;
+        if (deficit <= 0) {
+            return;
+        }
+
+        const existing = active.map((a) => a.question);
+        const generated = await generateQuestions(deficit, existing);
+
+        if (generated.length === 0) {
+            return;
+        }
+
+        await db.insert(predictionQuestion).values(
+            generated.map((g) => ({
+                question: g.question.slice(0, 200), // varchar(200) safety cap
+                status: 'ACTIVE' as const,
+                resolutionDate: g.resolutionDate,
+                requiresWebSearch: g.requiresWebSearch,
+                creatorId: null,
+                totalYesAmount: '0.00000000',
+                totalNoAmount: '0.00000000'
+            }))
+        );
+
+        console.log(
+            `🤖 Hopium: generated ${generated.length} new questions ` +
+                `(active ${active.length} → ${active.length + generated.length})`
+        );
+    } catch (error) {
+        console.error('Error topping up Hopium questions:', error);
     }
 }

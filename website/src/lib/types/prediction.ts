@@ -3,6 +3,8 @@ export interface PredictionQuestion {
 	question: string;
 	description: string;
 	aiResolution: boolean;
+	aiReasoning?: string | null;
+	aiConfidence?: number | null;
 	status: 'ACTIVE' | 'RESOLVED' | 'CANCELLED';
 	resolutionDate: string;
 	totalAmount: number;
@@ -14,10 +16,10 @@ export interface PredictionQuestion {
 	resolvedAt: string | null;
 	requiresWebSearch: boolean;
 	creator: {
-		id: number;
+		id: number | null;
 		name: string;
 		username: string;
-		image: string;
+		image: string | null;
 		nameColor?: string | null;
 	};
 	userBets?: {
@@ -26,6 +28,8 @@ export interface PredictionQuestion {
 		totalAmount?: number;
 		estimatedYesWinnings?: number;
 		estimatedNoWinnings?: number;
+		actualYesWinnings?: number;
+		actualNoWinnings?: number;
 	};
 	// fuck gdpr and all that fucking shit
 	recentBets?: Array<{

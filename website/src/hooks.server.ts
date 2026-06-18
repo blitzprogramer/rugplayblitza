@@ -1,5 +1,5 @@
 import { auth } from "$lib/auth";
-import { resolveExpiredQuestions, processAccountDeletions } from "$lib/server/job";
+import { resolveExpiredQuestions, processAccountDeletions, topUpHopiumQuestions } from "$lib/server/job";
 import { svelteKitHandler } from "better-auth/svelte-kit";
 import { redis } from "$lib/server/redis";
 import { building } from '$app/environment';
@@ -17,6 +17,15 @@ const RATE_RULES: Array<{
     limit: number;
     windowSecs: number;
 }> = [
+    {
+        // Crash round polling is read-only and fires ~6x/s during an active
+        // round, so it gets its own generous bucket instead of burning through
+        // the shared arcade action limit (which would 429 the start/cashout click).
+        match: (p) => p.startsWith('/api/arcade/crash/state'),
+        key: 'crash-state',
+        limit: 100,
+        windowSecs: 10
+    },
     {
         match: (p) => p.startsWith('/api/arcade/'),
         key: 'arcade',
@@ -78,9 +87,17 @@ async function initializeScheduler() {
 
             resolveExpiredQuestions().catch(console.error);
             processAccountDeletions().catch(console.error);
+            topUpHopiumQuestions().catch(console.error);
 
-            const schedulerInterval = setInterval(() => {
+            // Hopium lifecycle: resolve overdue questions and top the active
+            // pool back up to 25 every minute (AI-only, pop-culture).
+            const hopiumInterval = setInterval(() => {
                 resolveExpiredQuestions().catch(console.error);
+                topUpHopiumQuestions().catch(console.error);
+            }, 60 * 1000);
+
+            // Account deletion requests and less-frequent housekeeping.
+            const schedulerInterval = setInterval(() => {
                 processAccountDeletions().catch(console.error);
             }, 5 * 60 * 1000);
 
@@ -94,6 +111,7 @@ async function initializeScheduler() {
             const cleanup = async () => {
                 clearInterval(renewInterval);
                 clearInterval(schedulerInterval);
+                clearInterval(hopiumInterval);
                 clearInterval(minesCleanupInterval);
                 const currentValue = await redis.get(lockKey);
                 if (currentValue === lockValue) {

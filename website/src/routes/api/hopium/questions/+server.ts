@@ -122,13 +122,23 @@ export const GET: RequestHandler = async ({ url, request }) => {
                 resolvedAt: q.resolvedAt,
                 requiresWebSearch: q.requiresWebSearch,
                 aiResolution: q.aiResolution,
-                creator: {
-                    id: q.creatorId,
-                    name: q.creatorName,
-                    username: q.creatorUsername,
-                    image: q.creatorImage,
-                    nameColor: q.creatorNameColor,
-                },
+                creator:
+                    q.creatorId === null
+                        ? {
+                              // AI-generated question — no human creator.
+                              id: null,
+                              name: 'Rugplay AI',
+                              username: 'rugplay-ai',
+                              image: null,
+                              nameColor: null
+                          }
+                        : {
+                              id: q.creatorId,
+                              name: q.creatorName,
+                              username: q.creatorUsername,
+                              image: q.creatorImage,
+                              nameColor: q.creatorNameColor
+                          },
                 userBets
             };
         });

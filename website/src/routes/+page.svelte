@@ -120,6 +120,9 @@
 								<div class="flex items-center gap-2">
 									<CoinIcon icon={coin.icon} symbol={coin.symbol} name={coin.name} size={6} />
 									<span>{coin.name} (*{coin.symbol})</span>
+									{#if coin.isFeatured}
+										<Badge variant="default" class="text-[10px]">★ Featured</Badge>
+									{/if}
 								</div>
 								<Badge variant={coin.change24h >= 0 ? 'success' : 'destructive'} class="ml-2">
 									{coin.change24h >= 0 ? '+' : ''}{coin.change24h.toFixed(2)}%

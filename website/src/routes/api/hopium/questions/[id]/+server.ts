@@ -29,6 +29,8 @@ export const GET: RequestHandler = async ({ params, request }) => {
                 resolvedAt: predictionQuestion.resolvedAt,
                 requiresWebSearch: predictionQuestion.requiresWebSearch,
                 aiResolution: predictionQuestion.aiResolution,
+                aiReasoning: predictionQuestion.aiReasoning,
+                aiConfidence: predictionQuestion.aiConfidence,
                 creatorId: predictionQuestion.creatorId,
                 creatorName: user.name,
                 creatorUsername: user.username,
@@ -129,6 +131,7 @@ export const GET: RequestHandler = async ({ params, request }) => {
                 .select({
                     side: predictionBet.side,
                     totalAmount: sum(predictionBet.amount),
+                    totalActualWinnings: sum(predictionBet.actualWinnings),
                 })
                 .from(predictionBet)
                 .where(and(
@@ -150,12 +153,18 @@ export const GET: RequestHandler = async ({ params, request }) => {
                     ? (totalAmount / Number(questionData.totalNoAmount)) * Number(noAmount)
                     : 0;
 
+                // Real settled winnings (0 while active; the actual payout once resolved).
+                const actualYesWinnings = Number(userBetData.find(bet => bet.side === true)?.totalActualWinnings || 0);
+                const actualNoWinnings = Number(userBetData.find(bet => bet.side === false)?.totalActualWinnings || 0);
+
                 userBets = {
                     yesAmount: Number(yesAmount),
                     noAmount: Number(noAmount),
                     totalAmount: userTotalAmount,
                     estimatedYesWinnings,
                     estimatedNoWinnings,
+                    actualYesWinnings,
+                    actualNoWinnings,
                 };
             }
         }
@@ -174,13 +183,18 @@ export const GET: RequestHandler = async ({ params, request }) => {
             resolvedAt: questionData.resolvedAt,
             requiresWebSearch: questionData.requiresWebSearch,
             aiResolution: questionData.aiResolution,
-            creator: {
-                id: questionData.creatorId,
-                name: questionData.creatorName,
-                username: questionData.creatorUsername,
-                image: questionData.creatorImage,
-                nameColor: questionData.creatorNameColor,
-            },
+            aiReasoning: questionData.aiReasoning,
+            aiConfidence: questionData.aiConfidence,
+            creator:
+                questionData.creatorId === null
+                    ? { id: null, name: 'Rugplay AI', username: 'rugplay-ai', image: null, nameColor: null }
+                    : {
+                          id: questionData.creatorId,
+                          name: questionData.creatorName,
+                          username: questionData.creatorUsername,
+                          image: questionData.creatorImage,
+                          nameColor: questionData.creatorNameColor
+                      },
             userBets,
             recentBets: recentBets.map(bet => ({
                 id: bet.id,

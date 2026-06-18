@@ -120,6 +120,7 @@ export const coin = pgTable("coin", {
 	isListed: boolean("is_listed").default(true).notNull(),
 	tradingUnlocksAt: timestamp("trading_unlocks_at"),
 	isLocked: boolean("is_locked").default(true).notNull(),
+	isFeatured: boolean("is_featured").default(false).notNull(),
 }, (table) => {
 	return {
 		symbolIdx: index("coin_symbol_idx").on(table.symbol),
@@ -130,6 +131,7 @@ export const coin = pgTable("coin", {
 		change24hIdx: index("coin_change24h_idx").on(table.change24h),
 		volume24hIdx: index("coin_volume24h_idx").on(table.volume24h),
 		createdAtIdx: index("coin_created_at_idx").on(table.createdAt),
+		isFeaturedIdx: index("coin_is_featured_idx").on(table.isFeatured),
 	};
 });
 
@@ -230,6 +232,8 @@ export const predictionQuestion = pgTable("prediction_question", {
 	status: predictionMarketEnum("status").notNull().default("ACTIVE"),
 	resolutionDate: timestamp("resolution_date", { withTimezone: true }).notNull(),
 	aiResolution: boolean("ai_resolution"), // true = YES, false = NO, null = unresolved
+	aiReasoning: text("ai_reasoning"), // AI's explanation, shown after resolution
+	aiConfidence: integer("ai_confidence"), // 0-100, null until resolved
 	totalYesAmount: decimal("total_yes_amount", { precision: 30, scale: 8 }).notNull().default("0.00000000"),
 	totalNoAmount: decimal("total_no_amount", { precision: 30, scale: 8 }).notNull().default("0.00000000"),
 
@@ -371,3 +375,11 @@ export const userBlock = pgTable("user_block", {
 	blockedIdIdx: index("user_block_blocked_id_idx").on(table.blockedId),
 	noSelfBlock: check("no_self_block", sql`blocker_id != blocked_id`),
 }));
+
+// Generic key-value store for admin-tunable runtime settings (e.g. Hopium
+// AI auto-generation toggle + target active-question count).
+export const siteSetting = pgTable("site_setting", {
+	key: varchar("key", { length: 100 }).primaryKey(),
+	value: text("value").notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

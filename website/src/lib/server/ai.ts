@@ -1,23 +1,8 @@
-import OpenAI from 'openai';
 import { z } from 'zod';
-import { OPENROUTER_API_KEY } from '$env/static/private';
 import { db } from './db';
 import { coin, user, transaction, priceHistory } from './db/schema';
 import { eq, desc, sql, gte } from 'drizzle-orm';
-
-if (!OPENROUTER_API_KEY) {
-    throw new Error('OPENROUTER_API_KEY is not set – AI features are disabled.');
-}
-
-const openai = new OpenAI({
-    baseURL: 'https://openrouter.ai/api/v1',
-    apiKey: OPENROUTER_API_KEY,
-});
-
-const MODELS = {
-    STANDARD: 'google/gemini-2.0-flash-001',
-    WEB_SEARCH: 'google/gemini-2.0-flash-001:online'
-} as const;
+import { callGemini, isGeminiConfigured, parseJsonResponse } from './gemini';
 
 const VALIDATION_CRITERIA = `
 Criteria for validation:
@@ -208,7 +193,7 @@ function extractCoinSymbols(text: string): string[] {
 }
 
 export async function validateQuestion(question: string, description?: string): Promise<QuestionValidationResult> {
-    if (!OPENROUTER_API_KEY) {
+    if (!isGeminiConfigured()) {
         return {
             isValid: false,
             requiresWebSearch: false,
@@ -280,17 +265,13 @@ Provide your response in the specified JSON format with a precise ISO 8601 datet
 `;
 
     try {
-        const completion = await openai.chat.completions.create({
-            model: MODELS.STANDARD,
-            messages: [
-                { role: 'system', content: 'You are a prediction market validator for Rugplay, a crypto trading simulation platform. Always respond with valid JSON matching the requested schema.' },
-                { role: 'user', content: prompt }
-            ],
-            temperature: 0.1,
-            response_format: { type: 'json_object' },
+        const { text: content } = await callGemini({
+            systemInstruction:
+                'You are a prediction market validator for Rugplay, a crypto trading simulation platform. Always respond with valid JSON matching the requested schema.',
+            prompt,
+            temperature: 0.1
         });
 
-        const content = completion.choices[0]?.message?.content;
         if (!content) {
             throw new Error('No response content from AI');
         }
@@ -318,15 +299,13 @@ export async function resolveQuestion(
     requiresWebSearch: boolean,
     customRugplayData?: string
 ): Promise<QuestionResolutionResult> {
-    if (!OPENROUTER_API_KEY) {
+    if (!isGeminiConfigured()) {
         return {
             resolution: false,
             confidence: 0,
             reasoning: 'AI service is not configured'
         };
     }
-
-    const model = requiresWebSearch ? MODELS.WEB_SEARCH : MODELS.STANDARD;
 
     const rugplayData = customRugplayData || await getRugplayData(question);
 
@@ -364,22 +343,19 @@ Respond with JSON: { "resolution": boolean, "confidence": number (0-100), "reaso
 `;
 
     try {
-        const completion = await openai.chat.completions.create({
-            model,
-            messages: [
-                { role: 'system', content: 'You are a prediction market resolver for Rugplay, a crypto trading simulation platform. Analyze the provided data carefully and resolve the question with a definitive YES or NO. Always respond with valid JSON matching the requested schema. Base your decision on factual data provided, not speculation.' },
-                { role: 'user', content: prompt }
-            ],
+        const { text: content } = await callGemini({
+            systemInstruction:
+                'You are a prediction market resolver for Rugplay, a crypto trading simulation platform. Analyze the provided data carefully and resolve the question with a definitive YES or NO. Always respond with valid JSON matching the requested schema. Base your decision on factual data provided, not speculation.',
+            prompt,
             temperature: 0.1,
-            response_format: { type: 'json_object' },
+            webSearch: requiresWebSearch
         });
 
-        const content = completion.choices[0]?.message?.content;
         if (!content) {
             throw new Error('No response content from AI');
         }
 
-        return QuestionResolutionSchema.parse(JSON.parse(content));
+        return QuestionResolutionSchema.parse(parseJsonResponse(content));
     } catch (error) {
         console.error('Question resolution error:', error);
         return {
@@ -468,3 +444,112 @@ Platform Details:
         return `Couldn't retrieve data, please try again later.`;
     }
 }
+
+// --- AI-generated pop-culture questions (Hopium 2.0) ---
+
+export interface GeneratedQuestion {
+    question: string;
+    description?: string;
+    resolutionDate: Date;
+    requiresWebSearch: boolean;
+}
+
+const GeneratedQuestionsSchema = z.object({
+    questions: z.array(
+        z.object({
+            question: z.string().min(5),
+            description: z.string().optional(),
+            resolutionDate: z.string(),
+            requiresWebSearch: z.boolean()
+        })
+    ).min(1)
+});
+
+const GENERATION_BOUNDARIES = `
+Topic scope (STRICT):
+- POP CULTURE / ENTERTAINMENT ONLY: music (rap, pop, albums, charts, tours, beefs), movies, TV/streaming, video games (e.g. GTA 6 premieres/delays/sales), sports outcomes, awards (Grammy, Oscar, etc.), celebrity news, memes, box office, streaming charts.
+- You MAY reference controversial public figures (e.g. Kanye West, Drake, Elon Musk) regarding their PROFESSIONAL, publicly-verifiable output (album drops, chart positions, releases, public events).
+
+HARD EXCLUSIONS — never generate questions about:
+- Politics, elections, government, policy
+- Death, tragedy, disasters, violence, crime
+- Hate speech, discrimination, or targeting any group
+- Health, illness, personal/private matters
+- Anything illegal or that bets on human suffering
+
+Every question must be a clean, verifiable yes/no about an entertainment / pop-culture outcome.
+`;
+
+const HOPium_TARGET_QUESTION_COUNT = 25;
+const HOPium_MAX_RESOLUTION_DAYS = 7;
+
+/**
+ * Generates fresh pop-culture prediction questions using Google Search grounding.
+ * Dates are clamped to [now+1h, now+7d] so the 1-week cap always holds.
+ */
+export async function generateQuestions(
+    count: number,
+    existingQuestions: string[] = []
+): Promise<GeneratedQuestion[]> {
+    if (!isGeminiConfigured()) {
+        throw new Error('GEMINI_API_KEY is not set – cannot generate questions.');
+    }
+
+    const now = new Date();
+    const minDate = new Date(now.getTime() + 60 * 60 * 1000); // +1 hour
+    const maxDate = new Date(now.getTime() + HOPium_MAX_RESOLUTION_DAYS * 24 * 60 * 60 * 1000);
+
+    const dedupeClause = existingQuestions.length > 0
+        ? `\nDo NOT duplicate or near-duplicate any of these already-active questions:\n${existingQuestions.map((q) => `- ${q}`).join('\n')}\n`
+        : '';
+
+    const prompt = `
+You generate fresh, engaging prediction-market questions for Rugplay's "Hopium" market.
+
+Generate exactly ${count} questions. Use Google Search to find what is CURRENTLY HOT in pop culture right now (today: ${now.toISOString()}).
+
+${GENERATION_BOUNDARIES}
+
+Rules for each question:
+1. Objective yes/no answer, resolvable by a factual, verifiable event.
+2. resolutionDate MUST be between 1 and 7 days from now (no earlier than 24h, no later than ${maxDate.toISOString()}), ideally between 12:00-20:00 UTC.
+3. requiresWebSearch = true for real-world pop-culture events (almost always true here).
+4. Make each specific and verifiable (e.g. "Will GTA 6 be officially released before ${maxDate.toISOString().slice(0, 10)}?", "Will <artist>'s next album reach #1 on the Billboard 200 within 7 days?").
+5. Vary topics across music, games, film, sports, celebrity, awards, memes.${dedupeClause}
+
+Respond with JSON in EXACTLY this shape:
+{ "questions": [ { "question": string, "description"?: string, "resolutionDate": "ISO 8601 UTC", "requiresWebSearch": boolean } ] }
+`;
+
+    const { text } = await callGemini({
+        systemInstruction:
+            'You are the question generator for Rugplay Hopium, an AI-run pop-culture prediction market. Use Google Search to stay current. Always respond with valid JSON matching the requested shape.',
+        prompt,
+        temperature: 0.9,
+        webSearch: true
+    });
+
+    const parsed = GeneratedQuestionsSchema.parse(parseJsonResponse(text));
+
+    return parsed.questions
+        .map((q) => {
+            const resolutionDate = new Date(q.resolutionDate);
+            const clamped =
+                resolutionDate < minDate ? minDate
+                : resolutionDate > maxDate ? maxDate
+                : resolutionDate;
+            return {
+                question: q.question.trim(),
+                description: q.description?.trim() || undefined,
+                resolutionDate: clamped,
+                requiresWebSearch: q.requiresWebSearch ?? true
+            };
+        })
+        .filter((q) => q.question.length >= 5)
+        .slice(0, count);
+}
+
+export const HOPium_SETTINGS = {
+    targetQuestionCount: HOPium_TARGET_QUESTION_COUNT,
+    maxResolutionDays: HOPium_MAX_RESOLUTION_DAYS
+};

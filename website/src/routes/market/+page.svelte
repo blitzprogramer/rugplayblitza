@@ -468,7 +468,7 @@
 								</div>
 							</div>
 							<div class="text-right">
-								<span class="text-muted-foreground font-mono text-xs">#{globalIndex}</span>
+								{#if coin.isFeatured}<Badge variant="default" class="text-[10px]">★ Featured</Badge> <br />{/if}<span class="text-muted-foreground font-mono text-xs">#{globalIndex}</span>
 							</div>
 						</div>
 					</Card.Header>
