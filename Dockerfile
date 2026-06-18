@@ -28,7 +28,27 @@ COPY website/. .
 # Create .svelte-kit directory if it doesn't exist
 RUN mkdir -p .svelte-kit
 
-# Generate SvelteKit types and build
+# Generate SvelteKit types and build.
+# SvelteKit's postbuild `analyse` step loads the server module graph, which trips
+# env-guards in db/index.ts & auth.ts (they throw if env is missing). We inject
+# NON-SECRET placeholders here so analyse passes. Real values come from the
+# container env_file at runtime; none of these reach the final production image
+# (production-main is a separate stage that only COPYs build/ + node_modules, and
+# the app reads all env via $env/dynamic/* at runtime, so nothing is baked).
+
+ENV DATABASE_URL="postgresql://build:build@build:5432/build" \
+    REDIS_URL="redis://build:6379" \
+    PUBLIC_BETTER_AUTH_URL="http://localhost" \
+    PUBLIC_WEBSOCKET_URL="ws://localhost:8080" \
+    GOOGLE_CLIENT_ID="build-placeholder" \
+    GOOGLE_CLIENT_SECRET="build-placeholder" \
+    PRIVATE_BETTER_AUTH_SECRET="build-placeholder-placeholder" \
+    PRIVATE_B2_KEY_ID="build" \
+    PRIVATE_B2_APP_KEY="build" \
+    PUBLIC_B2_BUCKET="build" \
+    PUBLIC_B2_ENDPOINT="https://build.local" \
+    PUBLIC_B2_REGION="build" \
+    GEMINI_API_KEY="build-placeholder"
 
 RUN npm run build
 
