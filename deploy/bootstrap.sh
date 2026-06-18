@@ -20,16 +20,21 @@ REPO_URL="https://github.com/blitzprogramer/rugplayblitza.git"
 SITE_URL="${SITE_URL:-http://bob153.mikrus.xyz:20153}"
 WS_URL="${WS_URL:-ws://bob153.mikrus.xyz:20153/ws}"
 
-echo "==> 1/6  Swap (2G, so pulls/runtime never OOM on 1 GB)"
-if ! swapon --show | grep -q swapfile; then
-	fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048
+echo "==> 1/6  Swap (2G — best-effort; LXC/mikr.us disallows swapon, app runs without)"
+if swapon --show | grep -q swapfile; then
+	echo "    already present"
+elif fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048; then
 	chmod 600 /swapfile
 	mkswap /swapfile
-	swapon /swapfile
-	grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-	echo "    swap created"
+	if swapon /swapfile 2>/dev/null; then
+		grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+		echo "    swap created"
+	else
+		rm -f /swapfile
+		echo "    swapon denied (container) — proceeding without swap"
+	fi
 else
-	echo "    already present"
+	echo "    could not allocate swapfile — proceeding without swap"
 fi
 
 echo "==> 2/6  Docker + git"
