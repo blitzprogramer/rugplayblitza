@@ -1,4 +1,3 @@
-import { PUBLIC_B2_BUCKET, PUBLIC_B2_ENDPOINT } from "$env/static/public";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { volumeSettings } from '$lib/stores/volume-settings';
@@ -32,6 +31,14 @@ export function getTimeBasedGreeting(name: string): string {
 export function getPublicUrl(key: string | null): string | null {
     if (!key) return null;
     return `/api/proxy/s3/${key}`;
+}
+
+// --- Crash game growth curve (shared: server computes payout, client animates) ---
+// Exponential growth from 1.00x: ~2.1x at 5s, ~4.5x at 10s, ~9.5x at 15s.
+export const CRASH_GROWTH_PER_MS = 0.00015;
+export function crashMultiplierFromElapsed(ms: number): number {
+    if (ms <= 0) return 1;
+    return Math.exp(CRASH_GROWTH_PER_MS * ms);
 }
 
 export function debounce(func: (...args: any[]) => void, wait: number) {

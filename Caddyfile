@@ -1,0 +1,17 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt).
+# DOMAIN is injected from the docker-compose environment (set at bootstrap).
+#
+# WebSocket upgrades are routed to the Bun websocket service; everything else
+# goes to the SvelteKit app. PUBLIC_WEBSOCKET_URL should be wss://<DOMAIN>.
+
+{$DOMAIN} {
+	encode gzip
+
+	@websockets {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websockets websocket:8080
+
+	reverse_proxy app:3000
+}

@@ -1,8 +1,8 @@
 import { createClient } from 'redis';
-import { REDIS_URL } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import { building } from '$app/environment';
 
-const redisUrl = REDIS_URL || 'redis://localhost:6379';
+const redisUrl = env.REDIS_URL || 'redis://localhost:6379';
 
 const client = createClient({
     url: redisUrl

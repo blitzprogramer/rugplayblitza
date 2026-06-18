@@ -1,34 +1,51 @@
+# Production stack for the mikr.us VPS.
+# Pulls pre-built images from GHCR (built by .github/workflows/deploy.yml).
+# Watchtower polls GHCR every 60s and auto-restarts containers on a new image,
+# so a `git push` lands on the server with no manual action.
+#
+# Run from the repo root (where this file lives) with website/.env present:
+#   DOMAIN=srvXXXX.mikr.us docker compose up -d
+
 services:
   app:
-    build:
-      context: .
-      target: production-main
-      dockerfile: Dockerfile
-    ports:
-      - "5900-5907:3000"
+    image: ghcr.io/blitzprogramer/rugplay-app:latest
+    restart: unless-stopped
     env_file:
       - website/.env
     depends_on:
       - websocket
-    restart: unless-stopped
-    networks:
-      - shared_backend
-    deploy:
-      replicas: 8
 
   websocket:
-    build:
-      context: .
-      target: production-websocket
-      dockerfile: Dockerfile
-    ports:
-      - "8082:8080"
+    image: ghcr.io/blitzprogramer/rugplay-websocket:latest
+    restart: unless-stopped
     env_file:
       - website/.env
-    restart: unless-stopped
-    networks:
-      - shared_backend
 
-networks:
-  shared_backend:
-    external: true
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - websocket
+
+  # Auto-updater: checks GHCR for new image tags and restarts app/websocket.
+  # Images are public, so anonymous pull works (set packages public after first build).
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 60 --cleanup app websocket
+
+volumes:
+  caddy_data:
+  caddy_config:

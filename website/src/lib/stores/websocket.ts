@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
-import { PUBLIC_WEBSOCKET_URL } from '$env/static/public';
+import { env } from '$env/dynamic/public';
 import { NOTIFICATIONS, UNREAD_COUNT } from './notifications';
 import { NEW_ACHIEVEMENTS_COUNT } from './achievements';
 import { USER_DATA } from './user-data';
@@ -42,7 +42,7 @@ export interface ArcadeActivity {
 }
 
 // Constants
-const WEBSOCKET_URL = PUBLIC_WEBSOCKET_URL;
+const WEBSOCKET_URL = env.PUBLIC_WEBSOCKET_URL;
 const RECONNECT_DELAY = 5000;
 const MAX_LIVE_TRADES = 5;
 const MAX_ALL_TRADES = 100;
