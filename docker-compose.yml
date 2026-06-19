@@ -20,7 +20,7 @@ services:
       # event.url.origin against PUBLIC_BETTER_AUTH_URL — behind nginx on a
       # non-standard port this must be set explicitly or /api/auth/* 404s.
       # Hardcoded to this VPS's public URL (single-site deploy).
-      - ORIGIN=http://bob153.mikrus.xyz:20153
+      - ORIGIN=https://coinplay.duckdns.org:20153
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
