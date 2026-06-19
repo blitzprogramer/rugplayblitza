@@ -38,6 +38,89 @@ export async function calculate24hMetrics(coinId: number, currentPrice: number, 
     return { change24h: Number(change24h.toFixed(4)), volume24h: Number(volume24h.toFixed(4)) };
 }
 
+// AMM BUY. Mirrors executeSellTrade's contract: owns the AMM math + writes the
+// transaction(BUY)/price_history/coin rows + 24h metrics. Does NOT touch user
+// balance or portfolio — the caller controls those (same as executeSellTrade).
+export async function executeBuyTrade(
+    tx: any,
+    coinData: any,
+    userId: number,
+    amount: number // dollars to spend
+) {
+    const poolCoinAmount = Number(coinData.poolCoinAmount);
+    const poolBaseCurrencyAmount = Number(coinData.poolBaseCurrencyAmount);
+    const currentPrice = Number(coinData.currentPrice);
+
+    if (poolCoinAmount <= 0 || poolBaseCurrencyAmount <= 0) {
+        throw new Error('Liquidity pool is not properly initialized or is empty');
+    }
+
+    const k = poolCoinAmount * poolBaseCurrencyAmount;
+    const newPoolBaseCurrency = poolBaseCurrencyAmount + amount;
+    const newPoolCoin = k / newPoolBaseCurrency;
+    const coinsBought = poolCoinAmount - newPoolCoin;
+    const newPrice = newPoolBaseCurrency / newPoolCoin;
+
+    if (coinsBought <= 0) {
+        return {
+            success: false,
+            coinsBought: 0,
+            totalCost: amount,
+            newPrice: currentPrice,
+            priceImpact: 0,
+            newPoolCoin,
+            newPoolBaseCurrency,
+            metrics: { change24h: Number(coinData.change24h || 0), volume24h: 0 }
+        };
+    }
+
+    const priceImpact = ((newPrice - currentPrice) / currentPrice) * 100;
+
+    await tx.insert(transaction).values({
+        userId,
+        coinId: coinData.id,
+        type: 'BUY',
+        quantity: coinsBought.toString(),
+        pricePerCoin: (amount / coinsBought).toString(),
+        totalBaseCurrencyAmount: amount.toString(),
+        timestamp: new Date()
+    });
+
+    await tx.insert(priceHistory).values({
+        coinId: coinData.id,
+        price: newPrice.toString()
+    });
+
+    const metrics = await calculate24hMetrics(coinData.id, newPrice, tx);
+
+    const MAX_STORABLE = 1e38;
+    const safeMarketCap = Math.min(Number(coinData.circulatingSupply) * newPrice, MAX_STORABLE);
+    const safeVolume = Math.min(metrics.volume24h, MAX_STORABLE);
+
+    await tx.update(coin)
+        .set({
+            currentPrice: newPrice.toString(),
+            marketCap: safeMarketCap.toString(),
+            poolCoinAmount: newPoolCoin.toString(),
+            poolBaseCurrencyAmount: newPoolBaseCurrency.toString(),
+            change24h: metrics.change24h.toString(),
+            volume24h: safeVolume.toString(),
+            updatedAt: new Date()
+        })
+        .where(eq(coin.id, coinData.id));
+
+    return {
+        success: true,
+        coinsBought,
+        totalCost: amount,
+        newPrice,
+        priceImpact,
+        newPoolCoin,
+        newPoolBaseCurrency,
+        metrics
+    };
+}
+
 export async function executeSellTrade(
     tx: any,
     coinData: any,

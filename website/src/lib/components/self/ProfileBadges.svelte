@@ -7,6 +7,7 @@
 		Fire02Icon,
 		StarIcon,
 		Rocket01Icon,
+		Robot02Icon,
 	} from '@hugeicons/core-free-icons';
 	import { getPrestigeName, getPrestigeColor } from '$lib/utils';
 
@@ -38,6 +39,9 @@
 			text="{user.loginStreak} day streak"
 			class="text-orange-500 {badgeClass}"
 		/>
+	{/if}
+	{#if user.isBot}
+		<SilentBadge icon={Robot02Icon} text="Bot" class="text-purple-500 {badgeClass}" />
 	{/if}
 	{#if user.isAdmin}
 		<SilentBadge icon={KnightShieldIcon} text="Admin" class="text-primary {badgeClass}" />

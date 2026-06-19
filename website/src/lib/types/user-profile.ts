@@ -7,6 +7,7 @@ export interface UserProfile {
 	createdAt: Date;
 	baseCurrencyBalance: number;
 	isAdmin: boolean;
+	isBot: boolean;
 	totalPortfolioValue: number;
 	loginStreak: number;
 

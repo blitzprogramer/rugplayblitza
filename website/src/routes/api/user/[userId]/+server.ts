@@ -24,6 +24,7 @@ export async function GET({ params }) {
                 createdAt: true,
                 baseCurrencyBalance: true,
                 isAdmin: true,
+                isBot: true,
                 loginStreak: true,
                 prestigeLevel: true,
                 halloweenBadge2025: true,

@@ -19,6 +19,7 @@ export interface LiveTrade {
     timestamp: number;
     userId: string;
     userImage?: string;
+    isBot?: boolean;
 }
 
 export interface PriceUpdate {

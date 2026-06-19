@@ -10,6 +10,7 @@ import { eq, sql } from 'drizzle-orm';
 import { minesCleanupInactiveGames, minesAutoCashout } from '$lib/server/games/mines';
 import { towerCleanupInactiveGames } from '$lib/server/games/tower';
 import { checkRateLimit } from '$lib/server/ratelimit';
+import { runBotTradingTick, runBotRebalance, BOTS_ENABLED } from '$lib/server/bot-trading';
 
 const RATE_RULES: Array<{
     match: (path: string, method: string) => boolean;
@@ -107,12 +108,29 @@ async function initializeScheduler() {
                 towerCleanupInactiveGames().catch(console.error);
             }, 60 * 1000);
 
+            // AI bot traders: trade tick every 30s, cash re-balance every 10min.
+            // BOTS_ENABLED is honored inside each function (env kill-switch).
+            let botTradingInterval: NodeJS.Timeout | undefined;
+            let botRebalanceInterval: NodeJS.Timeout | undefined;
+            if (BOTS_ENABLED) {
+                runBotTradingTick().catch(console.error);
+                botTradingInterval = setInterval(() => {
+                    runBotTradingTick().catch(console.error);
+                }, 30 * 1000);
+                botRebalanceInterval = setInterval(() => {
+                    runBotRebalance().catch(console.error);
+                }, 10 * 60 * 1000);
+                console.log('🤖 AI bot trader loop started');
+            }
+
             // Cleanup on process exit
             const cleanup = async () => {
                 clearInterval(renewInterval);
                 clearInterval(schedulerInterval);
                 clearInterval(hopiumInterval);
                 clearInterval(minesCleanupInterval);
+                if (botTradingInterval) clearInterval(botTradingInterval);
+                if (botRebalanceInterval) clearInterval(botRebalanceInterval);
                 const currentValue = await redis.get(lockKey);
                 if (currentValue === lockValue) {
                     await redis.del(lockKey);

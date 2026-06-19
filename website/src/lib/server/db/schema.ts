@@ -55,11 +55,16 @@ export const user = pgTable("user", {
 	nameColor: text("name_color"),
 	founderBadge: boolean("founder_badge").notNull().default(false),
 	disableMentions: boolean("disable_mentions").notNull().default(false),
+	// AI bot traders. Real users are never bots. isBot drives leaderboard
+	// exclusion + the "Bot" badge. botPersonality is set once at seed time.
+	isBot: boolean("is_bot").default(false).notNull(),
+	botPersonality: varchar("bot_personality", { length: 20 }),
 }, (table) => {
 	return {
 		usernameIdx: index("user_username_idx").on(table.username),
 		isBannedIdx: index("user_is_banned_idx").on(table.isBanned),
 		isAdminIdx: index("user_is_admin_idx").on(table.isAdmin),
+		isBotIdx: index("user_is_bot_idx").on(table.isBot),
 		createdAtIdx: index("user_created_at_idx").on(table.createdAt),
 		updatedAtIdx: index("user_updated_at_idx").on(table.updatedAt),
 	};

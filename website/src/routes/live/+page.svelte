@@ -8,7 +8,8 @@
 		Activity01Icon,
 		TradeUpIcon,
 		TradeDownIcon,
-		Clock01Icon
+		Clock01Icon,
+		Robot02Icon
 	} from '@hugeicons/core-free-icons';
 	import { allTradesStore, isLoadingTrades, loadInitialTrades } from '$lib/stores/websocket';
 	import { goto } from '$app/navigation';
@@ -158,6 +159,14 @@
 													<span class="max-w-[120px] truncate text-xs sm:max-w-none sm:text-sm"
 														>@{trade.username}</span
 													>
+													{#if trade.isBot}
+														<span
+															class="inline-flex items-center rounded bg-purple-500/15 px-1 text-[10px] font-medium text-purple-400"
+														>
+															<HugeiconsIcon icon={Robot02Icon} class="mr-0.5 h-2.5 w-2.5" />
+															BOT
+														</span>
+													{/if}
 												</div>
 											</HoverCard.Trigger>
 											<HoverCard.Content class="w-80" side="top" sideOffset={3}>

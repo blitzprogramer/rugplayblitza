@@ -23,7 +23,8 @@ export async function GET({ url }) {
                 totalValue: transaction.totalBaseCurrencyAmount,
                 price: transaction.pricePerCoin,
                 timestamp: transaction.timestamp,
-                userId: transaction.userId
+                userId: transaction.userId,
+                isBot: user.isBot
             })
             .from(transaction)
             .innerJoin(user, eq(user.id, transaction.userId))
@@ -47,7 +48,8 @@ export async function GET({ url }) {
             totalValue: Number(trade.totalValue),
             price: Number(trade.price),
             timestamp: trade.timestamp.getTime(),
-            userId: trade.userId?.toString() ?? ''
+            userId: trade.userId?.toString() ?? '',
+            isBot: trade.isBot ?? false
         }));
 
         return json({ trades: formattedTrades });

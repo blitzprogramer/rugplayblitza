@@ -20,7 +20,7 @@ async function getLeaderboardData() {
             })
             .from(transaction)
             .innerJoin(user, eq(transaction.userId, user.id))
-            .where(gte(transaction.timestamp, twentyFourHoursAgo))
+            .where(and(gte(transaction.timestamp, twentyFourHoursAgo), eq(user.isBot, false)))
             .groupBy(user.id, user.username, user.name, user.image, user.nameColor, user.founderBadge)
             .orderBy(desc(sql`SUM(CASE WHEN ${transaction.type} = 'SELL' THEN CAST(${transaction.totalBaseCurrencyAmount} AS NUMERIC) ELSE 0 END) - SUM(CASE WHEN ${transaction.type} = 'BUY' THEN CAST(${transaction.totalBaseCurrencyAmount} AS NUMERIC) ELSE 0 END)`))
             .limit(10);
@@ -40,7 +40,7 @@ async function getLeaderboardData() {
             })
             .from(transaction)
             .innerJoin(user, eq(transaction.userId, user.id))
-            .where(gte(transaction.timestamp, twentyFourHoursAgo));
+            .where(and(gte(transaction.timestamp, twentyFourHoursAgo), eq(user.isBot, false)));
 
         const userNetCalculations = new Map();
         for (const tx of userTransactions) {
@@ -127,6 +127,7 @@ async function getLeaderboardData() {
                 coinValue: sql<number>`COALESCE(SUM(CAST(${userPortfolio.quantity} AS NUMERIC) * CAST(${coin.currentPrice} AS NUMERIC)), 0)`
             })
                 .from(user)
+                .where(eq(user.isBot, false))
                 .leftJoin(userPortfolio, eq(userPortfolio.userId, user.id))
                 .leftJoin(coin, eq(coin.id, userPortfolio.coinId))
                 .groupBy(user.id, user.username, user.name, user.image, user.nameColor, user.founderBadge, user.baseCurrencyBalance)
@@ -144,6 +145,7 @@ async function getLeaderboardData() {
                 coinValue: sql<number>`COALESCE(SUM(CAST(${userPortfolio.quantity} AS NUMERIC) * CAST(${coin.currentPrice} AS NUMERIC)), 0)`
             })
                 .from(user)
+                .where(eq(user.isBot, false))
                 .leftJoin(userPortfolio, eq(userPortfolio.userId, user.id))
                 .leftJoin(coin, eq(coin.id, userPortfolio.coinId))
                 .groupBy(user.id, user.username, user.name, user.image, user.nameColor, user.founderBadge, user.baseCurrencyBalance)
