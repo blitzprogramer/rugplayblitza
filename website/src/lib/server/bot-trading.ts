@@ -9,10 +9,10 @@
 
 import { env } from '$env/dynamic/private';
 import { db } from '$lib/server/db';
-import { coin, userPortfolio, user, priceHistory } from '$lib/server/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { coin, userPortfolio, user, priceHistory, transaction } from '$lib/server/db/schema';
+import { eq, and, desc, sql, count, inArray } from 'drizzle-orm';
 import { redis } from '$lib/server/redis';
-import { executeTrade } from '$lib/server/trading';
+import { executeTrade, type TradeResult, type TradeType } from '$lib/server/trading';
 
 // Kill-switch (default on). Set BOTS_ENABLED=false to freeze the loop without a
 // redeploy in dev. BOTS_TRADE_PROB overrides the per-bot trade chance.
@@ -32,6 +32,23 @@ const REBALANCE_TO = 5000;
 const CACHE_TTL_BOTS = 60_000; // 60s
 const CACHE_TTL_COINS = 30_000; // 30s
 const MAX_ACTORS_PER_TICK = 5;
+
+// --- admin-controlled market bias (in-memory; resets on restart) ---
+// Soft global tilt applied to every bot decision. Set via /api/admin/bots/config.
+// 'bull' nudges toward buying, 'bear' toward selling, 'neutral' = off.
+type MarketBias = 'bull' | 'bear' | 'neutral';
+let marketBias: MarketBias = 'neutral';
+
+export function getMarketBias(): MarketBias {
+    return marketBias;
+}
+
+export function setMarketBias(b: MarketBias): MarketBias {
+    if (b === 'bull' || b === 'bear' || b === 'neutral') {
+        marketBias = b;
+    }
+    return marketBias;
+}
 
 type Personality = 'contrarian' | 'momentum' | 'degen';
 
@@ -175,6 +192,34 @@ function decideAction(personality: Personality, recentPct: number): Decision {
     };
 }
 
+// Admin market-bias tilt: softly nudges the personality decision toward the
+// configured bias. Applied AFTER decideAction so per-personality logic + sizing
+// are untouched — only the action (and a matching sellFraction) may flip. p=0.5
+// keeps the tilt felt (~2–5 nudged orders/min) without flooding the tape.
+const BIAS_FLIP_PROBABILITY = 0.5;
+
+function applyBiasTilt(decision: Decision, bias: MarketBias): Decision {
+    if (bias === 'neutral') return decision;
+    const roll = Math.random();
+    if (bias === 'bull') {
+        if (decision.action === 'SELL' && roll < BIAS_FLIP_PROBABILITY) {
+            return { ...decision, action: 'BUY', sellFraction: 0.25 };
+        }
+        if (decision.action === 'HOLD' && roll < BIAS_FLIP_PROBABILITY) {
+            return { ...decision, action: 'BUY', sellFraction: 0.25 };
+        }
+    } else {
+        // bear
+        if (decision.action === 'BUY' && roll < BIAS_FLIP_PROBABILITY) {
+            return { ...decision, action: 'SELL', sellFraction: 0.5 };
+        }
+        if (decision.action === 'HOLD' && roll < BIAS_FLIP_PROBABILITY) {
+            return { ...decision, action: 'SELL', sellFraction: 0.5 };
+        }
+    }
+    return decision;
+}
+
 // Current pool snapshot (no lock) for honest impact-capped sizing. executeTrade
 // does the authoritative locked re-read; this is only to size the order.
 async function getCurrentPool(coinId: number): Promise<{
@@ -225,7 +270,8 @@ async function maybeTrade(bot: BotRow, coins: LiquidCoinMeta[]) {
     const picked = coins[Math.floor(Math.random() * coins.length)];
     const personality = (bot.botPersonality as Personality) ?? 'contrarian';
     const recentPct = await getRecentPriceAction(picked.id);
-    const decision = decideAction(personality, recentPct);
+    let decision = decideAction(personality, recentPct);
+    decision = applyBiasTilt(decision, marketBias);
 
     if (decision.action === 'HOLD') return;
 
@@ -268,6 +314,22 @@ function publishTradeResult(res: Awaited<ReturnType<typeof executeTrade>>) {
     } catch (e) {
         console.error('[bots] publish failed:', e);
     }
+}
+
+// Admin: force a single bot to trade a specific coin immediately, with NO
+// impact cap — the admin chooses the size, so this can move price hard. Routes
+// through the same executeTrade path players/bots use, then fans out Redis so
+// the live feed reflects it. amount semantics match executeTrade: BUY = dollars,
+// SELL = token quantity.
+export async function forceBotTrade(
+    botId: number,
+    symbol: string,
+    type: TradeType,
+    amount: number
+): Promise<TradeResult> {
+    const res = await executeTrade(botId, symbol, type, amount);
+    if (res.ok) publishTradeResult(res);
+    return res;
 }
 
 // Every 30s: pick a few bots at random and let each attempt one trade.
@@ -315,4 +377,100 @@ export async function runBotRebalance() {
     } catch (e) {
         console.error('[bots] rebalance error:', e);
     }
+}
+
+// Admin dashboard: live snapshot of every bot (balance, personality, holdings,
+// portfolio value) + the most recent bot trades. NOT cached — fresh every call.
+export interface BotStatusRow {
+    id: number;
+    username: string;
+    image: string | null;
+    botPersonality: string | null;
+    baseCurrencyBalance: number;
+    holdingCount: number;
+    portfolioValue: number;
+}
+
+export interface BotRecentTrade {
+    id: number;
+    userId: number;
+    username: string;
+    coinSymbol: string;
+    type: TradeType;
+    quantity: number;
+    totalValue: number;
+    timestamp: string;
+}
+
+export interface BotsStatus {
+    bots: BotStatusRow[];
+    recentTrades: BotRecentTrade[];
+    bias: MarketBias;
+}
+
+export async function getBotsStatus(): Promise<BotsStatus> {
+    // Bots + holding count + portfolio value (SUM(quantity * current_price)).
+    // GROUP BY keeps it one row/bot; LEFT JOIN so walletless bots still appear.
+    const botRows = await db
+        .select({
+            id: user.id,
+            username: user.username,
+            image: user.image,
+            botPersonality: user.botPersonality,
+            baseCurrencyBalance: user.baseCurrencyBalance,
+            holdingCount: count(userPortfolio.coinId),
+            portfolioValue: sql<number>`coalesce(sum(${userPortfolio.quantity} * ${coin.currentPrice}), 0)`
+        })
+        .from(user)
+        .where(eq(user.isBot, true))
+        .leftJoin(userPortfolio, eq(userPortfolio.userId, user.id))
+        .leftJoin(coin, eq(coin.id, userPortfolio.coinId))
+        .groupBy(user.id)
+        .orderBy(user.id);
+
+    const bots: BotStatusRow[] = botRows.map((r) => ({
+        id: r.id,
+        username: r.username,
+        image: r.image,
+        botPersonality: r.botPersonality,
+        baseCurrencyBalance: Number(r.baseCurrencyBalance),
+        holdingCount: Number(r.holdingCount),
+        portfolioValue: Number(r.portfolioValue)
+    }));
+
+    // Most recent ~12 bot transactions (bots only ever BUY/SELL — no transfers).
+    const botIds = bots.map((b) => b.id);
+    let recentTrades: BotRecentTrade[] = [];
+    if (botIds.length > 0) {
+        const txRows = await db
+            .select({
+                id: transaction.id,
+                userId: transaction.userId,
+                username: user.username,
+                coinSymbol: coin.symbol,
+                type: transaction.type,
+                quantity: transaction.quantity,
+                totalValue: transaction.totalBaseCurrencyAmount,
+                timestamp: transaction.timestamp
+            })
+            .from(transaction)
+            .innerJoin(user, eq(user.id, transaction.userId))
+            .innerJoin(coin, eq(coin.id, transaction.coinId))
+            .where(inArray(transaction.userId, botIds))
+            .orderBy(desc(transaction.timestamp))
+            .limit(12);
+
+        recentTrades = txRows.map((r) => ({
+            id: r.id,
+            userId: r.userId ?? 0,
+            username: r.username,
+            coinSymbol: r.coinSymbol,
+            type: r.type as TradeType,
+            quantity: Number(r.quantity),
+            totalValue: Number(r.totalValue),
+            timestamp: r.timestamp.toISOString()
+        }));
+    }
+
+    return { bots, recentTrades, bias: marketBias };
 }

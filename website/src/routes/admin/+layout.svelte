@@ -9,7 +9,8 @@
 		Analytics01Icon,
 		Notification01Icon,
 		Coins02Icon,
-		ArrowUpDownIcon
+		ArrowUpDownIcon,
+		Robot02Icon
 	} from '@hugeicons/core-free-icons';
 
 	let { children } = $props();
@@ -20,7 +21,8 @@
 		{ href: '/admin/promo', label: 'Promo Codes', icon: Ticket01Icon },
 		{ href: '/admin/notify', label: 'Broadcast', icon: Notification01Icon },
 		{ href: '/admin/coins', label: 'Featured Coins', icon: Coins02Icon },
-		{ href: '/admin/hopium', label: 'Hopium', icon: ArrowUpDownIcon }
+		{ href: '/admin/hopium', label: 'Hopium', icon: ArrowUpDownIcon },
+		{ href: '/admin/bots', label: 'Bots', icon: Robot02Icon }
 	];
 
 	function isActive(href: string, exact = false): boolean {
